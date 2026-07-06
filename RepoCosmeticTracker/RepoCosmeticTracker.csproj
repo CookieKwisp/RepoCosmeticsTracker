@@ -19,6 +19,7 @@
          etc.) so the catalog can be rebuilt without ever running AssetRipper -->
     <PackageReference Include="AssetsTools.NET" Version="3.0.4" />
     <PackageReference Include="AssetsTools.NET.MonoCecil" Version="1.0.1" />
+    <PackageReference Include="VirtualizingWrapPanel" Version="2.5.2" />
   </ItemGroup>
 
 </Project>
