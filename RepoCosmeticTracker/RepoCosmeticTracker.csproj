@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>RepoCosmeticTracker</AssemblyName>
+    <RootNamespace>RepoCosmeticTracker</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Registry access to find the Steam install path -->
+    <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
+    <!-- Lets us inspect Assembly-CSharp.dll's types/fields without executing
+         any game code and without needing the UnityEngine runtime present -->
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="8.0.0" />
+    <!-- Reads REPO's raw Unity data files directly (level0, resources.assets,
+         etc.) so the catalog can be rebuilt without ever running AssetRipper -->
+    <PackageReference Include="AssetsTools.NET" Version="3.0.4" />
+    <PackageReference Include="AssetsTools.NET.MonoCecil" Version="1.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Ships a starter catalog next to the built .exe -->
+    <None Update="catalog.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
