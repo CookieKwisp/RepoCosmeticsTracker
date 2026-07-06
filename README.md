@@ -41,9 +41,10 @@ rebuild (normally unnecessary — game updates are detected automatically).
 
 | File | Role |
 | --- | --- |
-| `Services/DirectAssetReader.cs` | Reads MetaManager's `cosmeticAssets` from level0–2 via AssetsTools.NET |
-| `Services/Es3Crypto.cs` / `SaveService.cs` | ES3 save decryption + `cosmeticUnlocks` extraction |
-| `Services/SaveWatcher.cs` | Debounced FileSystemWatcher over the save folder |
-| `Services/SoundService.cs` | In-memory synthesized WAV click/chime sounds |
-| `Services/GameLocator.cs` | Finds the Steam install + save folder via registry/manifests |
-| `MainWindow.xaml(.cs)` | The single-screen card grid UI |
+| `RepoCosmeticTracker/Services/DirectAssetReader.cs` | Reads MetaManager's `cosmeticAssets` from level0–2 via AssetsTools.NET |
+| `RepoCosmeticTracker/Services/Es3Crypto.cs` / `SaveService.cs` | ES3 save decryption + `cosmeticUnlocks` extraction |
+| `RepoCosmeticTracker/Services/SaveWatcher.cs` | Debounced FileSystemWatcher over the save folder |
+| `RepoCosmeticTracker/Services/CosmeticIconIndex.cs` | Matches catalog entries to the game's cached icon PNGs |
+| `RepoCosmeticTracker/Services/SoundService.cs` | In-memory synthesized WAV click/chime sounds |
+| `RepoCosmeticTracker/Services/GameLocator.cs` | Finds the Steam install + save folder via registry/manifests |
+| `RepoCosmeticTracker/MainWindow.xaml(.cs)` | The single-screen card grid UI |
