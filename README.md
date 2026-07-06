@@ -31,11 +31,11 @@ dotnet run --project RepoCosmeticTracker
 
 Requires .NET 8, Windows, and R.E.P.O. installed via Steam (run the game once
 so a save exists). First launch downloads a small Unity type database
-(`classdata.tpk`) used to parse the game files, then builds the catalog —
+(`classdata.tpk`) used to parse the game files, then builds the catalog,
 after that, startup is instant from the cache.
 
 The **↻ Rescan game files** button in the status bar forces a full catalog
-rebuild (normally unnecessary — game updates are detected automatically).
+rebuild (normally unnecessary game updates are detected automatically).
 
 ## How the pieces fit
 
