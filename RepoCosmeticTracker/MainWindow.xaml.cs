@@ -1,571 +1,518 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
-using System.Text;
 using System.Text.Json;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Data;
 using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Media.Animation;
 using RepoCosmeticTracker.Models;
 using RepoCosmeticTracker.Services;
 
 namespace RepoCosmeticTracker
 {
+    /// <summary>
+    /// The whole app is one screen: a grid of rarity-colored cards, filters,
+    /// and a status bar. Everything else is automatic —
+    ///  - on launch: load cached catalog.json instantly, rebuild it from the
+    ///    game's own data files only when they've changed since the cache,
+    ///  - ownership syncs from MetaSave.es3 (decrypted in place) and re-syncs
+    ///    whenever the game writes a save, via an event-driven file watcher,
+    ///  - clicking a card toggles it and persists immediately.
+    /// </summary>
     public partial class MainWindow : Window
     {
+        private const double ProgressBarWidth = 200;
+
         private readonly ObservableCollection<CosmeticItem> _cosmetics = new();
-        private string? _currentJson;
-        private string? _lastRawJson; // pure JSON from the last single-file open, used for sync
-        private string? _assemblyPath;
-        private string? _exportFolder;
-        private readonly AppSettings _settings;
+        private ListCollectionView _view = null!;
+
+        private readonly HashSet<string> _rarityFilter = new();
+        private string _search = "";
+        private string? _categoryFilter;      // null = all categories
+        private bool _hideOwned;
+        private bool _updatingCategories;
+
+        private SaveWatcher? _watcher;
+        private bool _rebuilding;
+        private Dictionary<string, string> _iconIndex = new();
+
+        private static string CatalogPath => Path.Combine(AppContext.BaseDirectory, "catalog.json");
 
         public MainWindow()
         {
             InitializeComponent();
-            CosmeticsGrid.ItemsSource = _cosmetics;
-            _settings = AppSettings.Load();
-            _exportFolder = _settings.LastExportFolder;
-            if (_exportFolder != null)
-                ExportFolderText.Text = _exportFolder;
-            DetectPaths();
+
+            _view = (ListCollectionView)CollectionViewSource.GetDefaultView(_cosmetics);
+            _view.Filter = FilterItem;
+            _view.SortDescriptions.Add(new SortDescription(nameof(CosmeticItem.RarityRank), ListSortDirection.Descending));
+            _view.SortDescriptions.Add(new SortDescription(nameof(CosmeticItem.DisplayName), ListSortDirection.Ascending));
+            CardsHost.ItemsSource = _view;
+
+            Loaded += OnLoaded;
         }
 
-        // Window.Background only paints the client area — the title bar and
-        // window border are drawn by Windows' own compositor (DWM) and don't
-        // look at WPF properties at all. This flips the *native* title bar
-        // into dark mode too (the same mechanism apps like VS Code and
-        // Windows Terminal use). Requires Windows 10 20H1+ / Windows 11;
-        // silently no-ops on anything older.
-        protected override void OnSourceInitialized(EventArgs e)
-        {
-            base.OnSourceInitialized(e);
-            TryEnableDarkTitleBar();
-        }
-
-        private void TryEnableDarkTitleBar()
+        private async void OnLoaded(object sender, RoutedEventArgs e)
         {
             try
             {
-                IntPtr hwnd = new WindowInteropHelper(this).Handle;
-                int useImmersiveDarkMode = 1;
+                await InitAsync();
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Startup error: {ex.Message}");
+            }
+        }
 
-                // 20 = DWMWA_USE_IMMERSIVE_DARK_MODE on Windows 10 20H1+/Windows 11.
-                int hr = DwmSetWindowAttribute(hwnd, 20, ref useImmersiveDarkMode, sizeof(int));
-                if (hr != 0)
+        private async Task InitAsync()
+        {
+            LoadCatalogFromDisk();
+
+            string? install = GameLocator.FindRepoInstallFolder();
+            SubtitleText.Text = install ?? "game not detected — tracking manually";
+
+            _iconIndex = await Task.Run(CosmeticIconIndex.BuildIndex);
+            ApplyIcons();
+
+            await SyncFromSaveAsync();
+            StartWatcher();
+
+            if (CatalogLooksStale())
+                await RebuildCatalogAsync();
+        }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            _watcher?.Dispose();
+            base.OnClosed(e);
+        }
+
+        // ===== Catalog persistence =====
+
+        private void LoadCatalogFromDisk()
+        {
+            try
+            {
+                if (File.Exists(CatalogPath))
                 {
-                    // 19 = the same attribute's older value, for early Windows 10 builds.
-                    DwmSetWindowAttribute(hwnd, 19, ref useImmersiveDarkMode, sizeof(int));
+                    var items = JsonSerializer.Deserialize<CosmeticItem[]>(File.ReadAllText(CatalogPath))
+                                ?? Array.Empty<CosmeticItem>();
+                    _cosmetics.Clear();
+                    foreach (CosmeticItem item in items)
+                        _cosmetics.Add(item);
                 }
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Couldn't read catalog.json: {ex.Message}");
+            }
+
+            PopulateCategories();
+            UpdateCounts();
+        }
+
+        private void SaveCatalog()
+        {
+            try
+            {
+                string json = JsonSerializer.Serialize(_cosmetics, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(CatalogPath, json);
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Couldn't save catalog.json: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Cheap staleness check so we only pay for a full asset parse when
+        /// the game actually updated (or we've never built a catalog).
+        /// </summary>
+        private bool CatalogLooksStale()
+        {
+            if (_cosmetics.Count == 0)
+                return true;
+
+            string? dataPath = GameLocator.FindRepoDataFolder();
+            if (dataPath == null)
+                return false;
+
+            var catalogInfo = new FileInfo(CatalogPath);
+            if (!catalogInfo.Exists)
+                return true;
+
+            foreach (string level in new[] { "level0", "level1", "level2" })
+            {
+                var levelInfo = new FileInfo(Path.Combine(dataPath, level));
+                if (levelInfo.Exists && levelInfo.LastWriteTimeUtc > catalogInfo.LastWriteTimeUtc)
+                    return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Rebuilds the catalog straight from the game's Unity data files,
+        /// preserving ownership of anything already tracked.
+        /// </summary>
+        private async Task RebuildCatalogAsync(bool userRequested = false)
+        {
+            if (_rebuilding)
+                return;
+
+            string? dataPath = GameLocator.FindRepoDataFolder();
+            if (dataPath == null)
+            {
+                if (userRequested)
+                    SetStatus("Game install not found — can't rescan.");
+                return;
+            }
+
+            _rebuilding = true;
+            RefreshButton.IsEnabled = false;
+            SetStatus("Reading cosmetics from game files…");
+
+            try
+            {
+                DirectAssetReader.ReadResult result =
+                    await Task.Run(() => DirectAssetReader.BuildCatalogAsync(dataPath));
+
+                if (result.Items.Count == 0)
+                {
+                    SetStatus("Catalog scan failed: " + (result.Log.LastOrDefault() ?? "unknown error"));
+                    return;
+                }
+
+                var oldIds = _cosmetics.Select(c => c.Id).ToHashSet();
+                var ownedIds = _cosmetics.Where(c => c.Owned).Select(c => c.Id).ToHashSet();
+                bool changed = result.Items.Count != _cosmetics.Count
+                               || result.Items.Any(i => !oldIds.Contains(i.Id));
+
+                if (!changed)
+                {
+                    // Touch the cache so the staleness check stops re-scanning.
+                    SaveCatalog();
+                    SetStatus("Catalog up to date.");
+                    return;
+                }
+
+                foreach (CosmeticItem item in result.Items)
+                    item.Owned = ownedIds.Contains(item.Id);
+
+                _cosmetics.Clear();
+                foreach (CosmeticItem item in result.Items)
+                    _cosmetics.Add(item);
+
+                // The game may have cached more icons since we last looked.
+                _iconIndex = await Task.Run(CosmeticIconIndex.BuildIndex);
+                ApplyIcons();
+
+                PopulateCategories();
+                SaveCatalog();
+                UpdateCounts();
+
+                int added = result.Items.Count(i => !oldIds.Contains(i.Id));
+                SetStatus(added > 0 && oldIds.Count > 0
+                    ? $"Catalog updated — {added} new cosmetic{(added == 1 ? "" : "s")} found."
+                    : $"Catalog built — {result.Items.Count} cosmetics.");
+
+                await SyncFromSaveAsync();
+            }
+            catch (Exception ex)
+            {
+                SetStatus("Catalog scan failed: " + ex.Message);
+            }
+            finally
+            {
+                _rebuilding = false;
+                RefreshButton.IsEnabled = true;
+            }
+        }
+
+        // ===== Save-file sync =====
+
+        private void StartWatcher()
+        {
+            string? root = GameLocator.GetRepoDataRoot();
+            if (root == null)
+            {
+                WatchDot.Fill = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x61));
+                return;
+            }
+
+            try
+            {
+                _watcher = new SaveWatcher(root);
+                _watcher.SaveChanged += () =>
+                    Dispatcher.BeginInvoke(async () => await SyncFromSaveAsync());
+                WatchDot.Fill = (Brush)FindResource("SuccessBrush");
+            }
+            catch (Exception ex)
+            {
+                SetStatus($"Save watcher failed to start: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Reads MetaSave.es3 and marks everything the game says is unlocked.
+        /// Additive on purpose: it never un-owns items you've checked by hand.
+        /// Retries briefly because the game may still hold the file mid-write.
+        /// </summary>
+        private async Task SyncFromSaveAsync()
+        {
+            string? root = GameLocator.GetRepoDataRoot();
+            if (root == null)
+            {
+                SetStatus("Save folder not found — run R.E.P.O. once to create it.");
+                return;
+            }
+
+            string metaPath = Path.Combine(root, "MetaSave.es3");
+            if (!File.Exists(metaPath))
+            {
+                SetStatus("MetaSave.es3 not found yet — waiting for the game to save.");
+                return;
+            }
+
+            string? json = null;
+            for (int attempt = 0; attempt < 4 && json == null; attempt++)
+            {
+                try
+                {
+                    json = await Task.Run(() => SaveService.DecryptFile(metaPath).Json);
+                }
+                catch
+                {
+                    await Task.Delay(300);
+                }
+            }
+
+            if (json == null)
+            {
+                SetStatus("Couldn't read MetaSave.es3 (file busy) — will retry on next save.");
+                return;
+            }
+
+            List<int>? unlocks;
+            try
+            {
+                unlocks = SaveService.ExtractIntListField(json, "cosmeticUnlocks");
             }
             catch
             {
-                // Not on Windows, or DWM unavailable — window still works fine,
-                // it'll just keep the default light title bar.
+                unlocks = null;
+            }
+
+            if (unlocks == null)
+            {
+                SetStatus("Save readable, but no cosmeticUnlocks field found.");
+                return;
+            }
+
+            var unlockedSet = unlocks.ToHashSet();
+            int newlyOwned = 0;
+            foreach (CosmeticItem item in _cosmetics)
+            {
+                if (!item.Owned && item.NumericId.HasValue && unlockedSet.Contains(item.NumericId.Value))
+                {
+                    item.Owned = true;
+                    newlyOwned++;
+                }
+            }
+
+            if (newlyOwned > 0)
+            {
+                SaveCatalog();
+                UpdateCounts();
+                if (_hideOwned)
+                    _view.Refresh();
+                SoundService.PlayChime();
+                SetStatus($"Synced from save — {newlyOwned} new unlock{(newlyOwned == 1 ? "" : "s")} ✓");
+            }
+            else
+            {
+                SetStatus($"In sync with save • {unlockedSet.Count} unlocked in game • {DateTime.Now:HH:mm}");
+            }
+        }
+
+        // ===== Card interaction =====
+
+        private void Card_Click(object sender, RoutedEventArgs e)
+        {
+            if ((sender as FrameworkElement)?.DataContext is not CosmeticItem item)
+                return;
+
+            item.Owned = !item.Owned;
+
+            if (item.Owned)
+                SoundService.PlayCheck();
+            else
+                SoundService.PlayUncheck();
+
+            SaveCatalog();
+            UpdateCounts();
+
+            if (_hideOwned)
+                _view.Refresh();
+        }
+
+        // ===== Filters =====
+
+        private bool FilterItem(object obj)
+        {
+            if (obj is not CosmeticItem item)
+                return false;
+
+            if (_hideOwned && item.Owned)
+                return false;
+
+            if (_rarityFilter.Count > 0 && !_rarityFilter.Contains(item.Rarity))
+                return false;
+
+            if (_categoryFilter != null && item.Category != _categoryFilter)
+                return false;
+
+            if (_search.Length > 0
+                && !item.DisplayName.Contains(_search, StringComparison.OrdinalIgnoreCase)
+                && !item.Category.Contains(_search, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            return true;
+        }
+
+        private void SearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            _search = SearchBox.Text.Trim();
+            _view.Refresh();
+        }
+
+        private void RarityChip_Changed(object sender, RoutedEventArgs e)
+        {
+            _rarityFilter.Clear();
+            foreach (ToggleButton chip in new[] { ChipCommon, ChipUncommon, ChipRare, ChipUltraRare })
+            {
+                if (chip.IsChecked == true && chip.Tag is string rarity)
+                    _rarityFilter.Add(rarity);
+            }
+            _view.Refresh();
+        }
+
+        private void CategoryCombo_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_updatingCategories)
+                return;
+            _categoryFilter = SelectedCategoryRaw();
+            _view.Refresh();
+        }
+
+        private void HideOwned_Changed(object sender, RoutedEventArgs e)
+        {
+            _hideOwned = HideOwnedChip.IsChecked == true;
+            _view.Refresh();
+        }
+
+        private void MuteToggle_Changed(object sender, RoutedEventArgs e)
+        {
+            SoundService.Muted = MuteToggle.IsChecked == true;
+            MuteToggle.Content = SoundService.Muted ? "\U0001F507" : "\U0001F50A";
+        }
+
+        private async void RefreshButton_Click(object sender, RoutedEventArgs e)
+        {
+            await RebuildCatalogAsync(userRequested: true);
+        }
+
+        /// <summary>Combo shows spaced names; filtering compares the raw ones.</summary>
+        private string? SelectedCategoryRaw()
+        {
+            if (CategoryCombo.SelectedIndex <= 0 || CategoryCombo.SelectedItem is not string display)
+                return null;
+            return display.Replace(" ", "");
+        }
+
+        private void ApplyIcons()
+        {
+            foreach (CosmeticItem item in _cosmetics)
+                item.IconPath = CosmeticIconIndex.Resolve(_iconIndex, item);
+        }
+
+        private void PopulateCategories()
+        {
+            _updatingCategories = true;
+            try
+            {
+                string? previous = _categoryFilter;
+
+                CategoryCombo.Items.Clear();
+                CategoryCombo.Items.Add("All categories");
+                foreach (string category in _cosmetics.Select(c => c.Category).Distinct().OrderBy(c => c))
+                    CategoryCombo.Items.Add(CosmeticItem.SpaceOutPascalCase(category));
+
+                int index = previous != null
+                    ? CategoryCombo.Items.IndexOf(CosmeticItem.SpaceOutPascalCase(previous))
+                    : 0;
+                CategoryCombo.SelectedIndex = index >= 0 ? index : 0;
+                _categoryFilter = SelectedCategoryRaw();
+            }
+            finally
+            {
+                _updatingCategories = false;
+            }
+        }
+
+        // ===== Header / status =====
+
+        private void UpdateCounts()
+        {
+            int owned = _cosmetics.Count(c => c.Owned);
+            int total = _cosmetics.Count;
+
+            OwnedCountRun.Text = owned.ToString();
+            TotalCountRun.Text = total.ToString();
+            EmptyState.Visibility = total == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            double target = total == 0 ? 0 : ProgressBarWidth * owned / total;
+            var animation = new DoubleAnimation(target, TimeSpan.FromMilliseconds(500))
+            {
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+            };
+            ProgressFill.BeginAnimation(WidthProperty, animation);
+        }
+
+        private void SetStatus(string message) => StatusText.Text = message;
+
+        // ===== Native dark title bar =====
+
+        // Window.Background only paints the client area — the title bar is
+        // drawn by DWM. This flips the native title bar into dark mode too
+        // (same mechanism VS Code and Windows Terminal use). No-ops silently
+        // on Windows builds older than 10 20H1.
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            base.OnSourceInitialized(e);
+            try
+            {
+                IntPtr hwnd = new WindowInteropHelper(this).Handle;
+                int enabled = 1;
+                // 20 = DWMWA_USE_IMMERSIVE_DARK_MODE (19 on early Win10 builds).
+                if (DwmSetWindowAttribute(hwnd, 20, ref enabled, sizeof(int)) != 0)
+                    DwmSetWindowAttribute(hwnd, 19, ref enabled, sizeof(int));
+            }
+            catch
+            {
+                // Not on Windows / DWM unavailable — light title bar, no harm.
             }
         }
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int pvAttribute, int cbAttribute);
-
-        private void DetectButton_Click(object sender, RoutedEventArgs e) => DetectPaths();
-
-        private void DetectPaths()
-        {
-            string? installDir = GameLocator.FindRepoInstallFolder();
-            InstallPathText.Text = installDir ?? "(not found — is REPO installed via Steam?)";
-
-            string? saveFolder = GameLocator.GetSaveFolder();
-            SaveFolderText.Text = saveFolder ?? "(not found)";
-
-            _assemblyPath = GameLocator.FindAssemblyCSharp();
-
-            SaveSlotCombo.Items.Clear();
-            foreach (string slot in GameLocator.GetSaveSlotFolders())
-                SaveSlotCombo.Items.Add(slot);
-
-            if (SaveSlotCombo.Items.Count > 0)
-                SaveSlotCombo.SelectedIndex = 0;
-        }
-
-        private void OpenSpecificFileButton_Click(object sender, RoutedEventArgs e)
-        {
-            string? startDir = GameLocator.GetRepoDataRoot();
-
-            var dialog = new Microsoft.Win32.OpenFileDialog
-            {
-                Filter = "ES3 save files (*.es3)|*.es3|All files (*.*)|*.*",
-                InitialDirectory = startDir ?? Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                Title = "Open a .es3 file to decrypt"
-            };
-
-            if (dialog.ShowDialog() != true)
-                return;
-
-            try
-            {
-                var decrypted = SaveService.DecryptFile(dialog.FileName);
-                _lastRawJson = decrypted.Json;
-                _currentJson = $"// ==== {decrypted.FileName} ====\r\n{decrypted.Json}";
-                JsonOutputBox.Text = _currentJson;
-                JsonSearchBox.Text = "";
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to decrypt: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private void ListAllEs3Button_Click(object sender, RoutedEventArgs e)
-        {
-            string? root = GameLocator.GetRepoDataRoot();
-            if (root == null)
-            {
-                MessageBox.Show("Couldn't find the Repo AppData folder. Click Detect first.");
-                return;
-            }
-
-            var files = SaveService.FindAllEs3Files(root).ToList();
-            _currentJson = null;
-
-            JsonOutputBox.Text = files.Count == 0
-                ? "No .es3 files found anywhere under the Repo AppData folder."
-                : $"Found {files.Count} .es3 file(s) under {root}:\r\n\r\n" + string.Join("\r\n", files);
-        }
-
-        private void DecryptButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (SaveSlotCombo.SelectedItem is not string slotFolder)
-            {
-                MessageBox.Show("Pick a save slot first.");
-                return;
-            }
-
-            try
-            {
-                var files = SaveService.DecryptAllInFolder(slotFolder);
-                if (files.Count == 0)
-                {
-                    JsonOutputBox.Text = "No .es3 files found in that save slot.";
-                    return;
-                }
-
-                var sb = new StringBuilder();
-                foreach (var f in files)
-                {
-                    sb.AppendLine($"// ==== {f.FileName} ====");
-                    sb.AppendLine(f.Json);
-                    sb.AppendLine();
-                }
-
-                _currentJson = sb.ToString();
-                JsonOutputBox.Text = _currentJson;
-            }
-            catch (Exception ex)
-            {
-                MessageBox.Show($"Failed to decrypt: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
-            }
-        }
-
-        private void JsonSearchBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_currentJson == null)
-                return;
-
-            string keyword = JsonSearchBox.Text;
-            if (string.IsNullOrWhiteSpace(keyword))
-            {
-                JsonOutputBox.Text = _currentJson;
-                return;
-            }
-
-            var matches = SaveService.FindMatchingLines(_currentJson, keyword).ToList();
-            JsonOutputBox.Text = matches.Count > 0
-                ? string.Join(Environment.NewLine, matches)
-                : "(no matching lines)";
-        }
-
-        private void ScanButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_assemblyPath == null)
-            {
-                MessageBox.Show("Couldn't find Assembly-CSharp.dll. Click Detect first, and make sure REPO is installed via Steam.");
-                return;
-            }
-
-            var keywords = KeywordsBox.Text
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-            try
-            {
-                var results = AssemblyInspector.ScanForCosmeticTypes(_assemblyPath, keywords);
-
-                if (results.Count == 0)
-                {
-                    ScanOutputBox.Text = "No matching types found. Try different keywords.";
-                    return;
-                }
-
-                var sb = new StringBuilder();
-                foreach (var t in results)
-                {
-                    sb.AppendLine($"[{t.Kind}] {t.FullName}");
-                    foreach (string m in t.Members)
-                        sb.AppendLine($"    {m}");
-                    sb.AppendLine();
-                }
-
-                ScanOutputBox.Text = sb.ToString();
-            }
-            catch (Exception ex)
-            {
-                ScanOutputBox.Text = $"Scan failed: {ex.Message}\r\n\r\n{ex.StackTrace}";
-            }
-        }
-
-        private async void RefreshCatalogButton_Click(object sender, RoutedEventArgs e)
-        {
-            string? repoDataPath = GameLocator.FindRepoDataFolder();
-            if (repoDataPath == null)
-            {
-                MessageBox.Show("Couldn't find REPO_Data automatically. Click \"Detect\" first and make sure REPO is installed via Steam.");
-                return;
-            }
-
-            string? repoRoot = GameLocator.GetRepoDataRoot();
-            string? metaSavePath = repoRoot != null ? Path.Combine(repoRoot, "MetaSave.es3") : null;
-            if (metaSavePath == null || !File.Exists(metaSavePath))
-            {
-                MessageBox.Show("Couldn't find MetaSave.es3 automatically. Click \"Detect\" first and make sure REPO has been run at least once.");
-                return;
-            }
-
-            RefreshCatalogButton.IsEnabled = false;
-            CatalogStatusText.Text = "Reading directly from game files (no AssetRipper needed)...";
-
-            try
-            {
-                DirectAssetReader.ReadResult readResult = await DirectAssetReader.BuildCatalogAsync(repoDataPath);
-
-                if (readResult.Items.Count == 0)
-                {
-                    CatalogStatusText.Text = "Failed: " + string.Join(" | ", readResult.Log);
-                    return;
-                }
-
-                DecryptedSaveFile decrypted = SaveService.DecryptFile(metaSavePath);
-                List<int>? unlockedIds = SaveService.ExtractIntListField(decrypted.Json, "cosmeticUnlocks");
-                var unlockedSet = new HashSet<int>(unlockedIds ?? new List<int>());
-
-                _cosmetics.Clear();
-                foreach (CosmeticItem item in readResult.Items)
-                {
-                    item.Owned = item.NumericId.HasValue && unlockedSet.Contains(item.NumericId.Value);
-                    _cosmetics.Add(item);
-                }
-
-                string catalogPath = Path.Combine(AppContext.BaseDirectory, "catalog.json");
-                string json = JsonSerializer.Serialize(_cosmetics, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(catalogPath, json);
-
-                CatalogStatusText.Text =
-                    $"Refreshed: {readResult.Items.Count} cosmetics, {unlockedSet.Count} owned. Saved to catalog.json. " +
-                    "(Read directly from game files — no AssetRipper.)";
-            }
-            catch (Exception ex)
-            {
-                CatalogStatusText.Text = $"Refresh failed: {ex.Message}";
-            }
-            finally
-            {
-                RefreshCatalogButton.IsEnabled = true;
-            }
-        }
-
-        private void BrowseExportFolderButton_Click(object sender, RoutedEventArgs e)
-        {
-            var dialog = new Microsoft.Win32.OpenFolderDialog
-            {
-                Title = "Select the AssetRipper export folder"
-            };
-
-            if (dialog.ShowDialog() != true)
-                return;
-
-            _exportFolder = dialog.FolderName;
-            ExportFolderText.Text = _exportFolder;
-            _settings.LastExportFolder = _exportFolder;
-            _settings.Save();
-        }
-
-        private async void AssetSearchButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_exportFolder == null)
-            {
-                MessageBox.Show("Browse to the export folder first.");
-                return;
-            }
-
-            string keyword = AssetSearchKeywordBox.Text;
-            if (string.IsNullOrWhiteSpace(keyword))
-            {
-                MessageBox.Show("Enter a keyword to search for.");
-                return;
-            }
-
-            string[] extensions = AssetSearchExtensionsBox.Text
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-
-            AssetSearchButton.IsEnabled = false;
-            AssetSearchResultsBox.Text = "Searching...";
-
-            var progress = new Progress<int>(count =>
-            {
-                AssetSearchResultsBox.Text = $"Scanned {count:N0} matching-extension files so far...";
-            });
-
-            try
-            {
-                List<AssetSearchResult> results = await Task.Run(() =>
-                    AssetSearchService.SearchFiles(_exportFolder, keyword, extensions, progress, CancellationToken.None));
-
-                if (results.Count == 0)
-                {
-                    AssetSearchResultsBox.Text =
-                        $"No matches for \"{keyword}\" in *.{string.Join(", *.", extensions)} files under that folder.";
-                }
-                else
-                {
-                    var sb = new StringBuilder();
-                    sb.AppendLine($"{results.Count} match(es):");
-                    sb.AppendLine();
-                    foreach (AssetSearchResult r in results)
-                    {
-                        sb.AppendLine(r.FilePath);
-                        sb.AppendLine($"    {r.MatchedLine}");
-                        sb.AppendLine();
-                    }
-                    AssetSearchResultsBox.Text = sb.ToString();
-                }
-            }
-            catch (Exception ex)
-            {
-                AssetSearchResultsBox.Text = $"Search failed: {ex.Message}";
-            }
-            finally
-            {
-                AssetSearchButton.IsEnabled = true;
-            }
-        }
-
-        private void ExtractBlockButton_Click(object sender, RoutedEventArgs e)
-        {
-            string filePath = ExtractFilePathBox.Text.Trim();
-            string fieldName = ExtractFieldNameBox.Text.Trim();
-
-            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath))
-            {
-                MessageBox.Show("Enter a valid file path (paste one from the search results above).");
-                return;
-            }
-
-            if (string.IsNullOrWhiteSpace(fieldName))
-            {
-                MessageBox.Show("Enter the field name to extract, e.g. cosmeticAssets.");
-                return;
-            }
-
-            try
-            {
-                List<string> entries = YamlBlockExtractor.ExtractListBlock(filePath, fieldName);
-
-                if (entries.Count == 0)
-                {
-                    AssetSearchResultsBox.Text =
-                        $"Found no list entries under \"{fieldName}\" in that file — double check the field name, " +
-                        "or the file/field combination might not be the one we're after.";
-                    return;
-                }
-
-                string outputPath = Path.Combine(AppContext.BaseDirectory, $"{fieldName}_extracted.txt");
-                File.WriteAllLines(outputPath, entries);
-
-                var sb = new StringBuilder();
-                sb.AppendLine($"{entries.Count} entries under \"{fieldName}\" (also saved to {outputPath}):");
-                sb.AppendLine();
-                foreach (string entry in entries)
-                    sb.AppendLine(entry);
-
-                AssetSearchResultsBox.Text = sb.ToString();
-            }
-            catch (Exception ex)
-            {
-                AssetSearchResultsBox.Text = $"Extraction failed: {ex.Message}";
-            }
-        }
-
-        private void ImportWithNumericIdsButton_Click(object sender, RoutedEventArgs e)
-        {
-            string guidListPath = Path.Combine(AppContext.BaseDirectory, "cosmeticAssets_extracted.txt");
-            if (!File.Exists(guidListPath))
-            {
-                MessageBox.Show(
-                    "cosmeticAssets_extracted.txt wasn't found next to the app. " +
-                    "Run \"Extract\" on the \"4. Find in Export\" tab first.");
-                return;
-            }
-
-            var dialog = new Microsoft.Win32.OpenFolderDialog
-            {
-                Title = "Select the AssetRipper export folder (same one as before)"
-            };
-
-            if (dialog.ShowDialog() != true)
-                return;
-
-            try
-            {
-                var result = CatalogImporter.ImportWithNumericIds(dialog.FolderName, guidListPath);
-
-                _cosmetics.Clear();
-                foreach (var item in result.Items)
-                    _cosmetics.Add(item);
-
-                int unresolved = result.Items.Count - result.MatchedFiles;
-                CatalogStatusText.Text =
-                    $"Imported {result.Items.Count} cosmetics with real NumericId values " +
-                    $"({result.MatchedFiles} resolved via GUID, {unresolved} unresolved). " +
-                    "Click \"Save changes\", then \"Sync ownership from opened file\" (with MetaSave.es3 open) to fill in Owned.";
-            }
-            catch (Exception ex)
-            {
-                CatalogStatusText.Text = $"Import failed: {ex.Message}";
-            }
-        }
-
-        private void ImportFromAssetRipperButton_Click(object sender, RoutedEventArgs e)
-        {
-            var dialog = new Microsoft.Win32.OpenFolderDialog
-            {
-                Title = "Select the AssetRipper export folder (the one containing exported .asset files)"
-            };
-
-            if (dialog.ShowDialog() != true)
-                return;
-
-            try
-            {
-                var result = CatalogImporter.ImportFromAssetRipperExport(dialog.FolderName);
-
-                if (result.Items.Count == 0)
-                {
-                    CatalogStatusText.Text =
-                        $"Scanned {result.FilesScanned} .asset files, found 0 CosmeticAsset instances. " +
-                        "Make sure this is the AssetRipper export root, not a subfolder.";
-                    return;
-                }
-
-                _cosmetics.Clear();
-                foreach (var item in result.Items)
-                    _cosmetics.Add(item);
-
-                CatalogStatusText.Text =
-                    $"Imported {result.Items.Count} cosmetics from {result.FilesScanned} scanned files. " +
-                    "Click \"Save changes\" to write this to catalog.json.";
-            }
-            catch (Exception ex)
-            {
-                CatalogStatusText.Text = $"Import failed: {ex.Message}";
-            }
-        }
-
-        private void SyncOwnershipButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_lastRawJson == null)
-            {
-                MessageBox.Show("Open a file first (Save Data tab → Open specific file... → MetaSave.es3).");
-                return;
-            }
-
-            List<int>? unlockedIds;
-            try
-            {
-                unlockedIds = SaveService.ExtractIntListField(_lastRawJson, "cosmeticUnlocks");
-            }
-            catch (Exception ex)
-            {
-                CatalogStatusText.Text = $"Couldn't parse the opened file: {ex.Message}";
-                return;
-            }
-
-            if (unlockedIds == null)
-            {
-                CatalogStatusText.Text = "No \"cosmeticUnlocks\" field in the currently opened file — open MetaSave.es3 first.";
-                return;
-            }
-
-            if (_cosmetics.Count == 0)
-            {
-                CatalogStatusText.Text = $"Found {unlockedIds.Count} unlocked IDs, but the catalog is empty — load catalog.json first.";
-                return;
-            }
-
-            int matched = 0;
-            foreach (CosmeticItem item in _cosmetics)
-            {
-                bool isUnlocked = item.NumericId.HasValue && unlockedIds.Contains(item.NumericId.Value);
-                item.Owned = isUnlocked;
-                if (isUnlocked)
-                    matched++;
-            }
-
-            CatalogStatusText.Text = $"Save has {unlockedIds.Count} unlocked IDs. {matched} matched a catalog entry with a NumericId set.";
-        }
-
-        private void LoadCatalogButton_Click(object sender, RoutedEventArgs e)
-        {
-            string path = Path.Combine(AppContext.BaseDirectory, "catalog.json");
-            if (!File.Exists(path))
-            {
-                CatalogStatusText.Text = "No catalog.json next to the .exe yet — see README.";
-                return;
-            }
-
-            try
-            {
-                string json = File.ReadAllText(path);
-                var items = JsonSerializer.Deserialize<CosmeticItem[]>(json) ?? Array.Empty<CosmeticItem>();
-
-                _cosmetics.Clear();
-                foreach (var item in items)
-                    _cosmetics.Add(item);
-
-                CatalogStatusText.Text = $"Loaded {_cosmetics.Count} items.";
-            }
-            catch (Exception ex)
-            {
-                CatalogStatusText.Text = $"Failed to load catalog.json: {ex.Message}";
-            }
-        }
-
-        private void SaveCatalogButton_Click(object sender, RoutedEventArgs e)
-        {
-            string path = Path.Combine(AppContext.BaseDirectory, "catalog.json");
-            try
-            {
-                string json = JsonSerializer.Serialize(_cosmetics, new JsonSerializerOptions { WriteIndented = true });
-                File.WriteAllText(path, json);
-                CatalogStatusText.Text = $"Saved {_cosmetics.Count} items.";
-            }
-            catch (Exception ex)
-            {
-                CatalogStatusText.Text = $"Failed to save: {ex.Message}";
-            }
-        }
     }
 }

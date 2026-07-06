@@ -71,6 +71,32 @@ namespace RepoCosmeticTracker.Services
             try
             {
                 manager.LoadClassPackage(tpkPath);
+            }
+            catch (Exception ex)
+            {
+                // A tpk we can't read — most likely a leftover download in the
+                // newer TPK v2 format (AssetRipper's nightly switched formats
+                // in July 2026; AssetsTools.NET only reads v1). Toss it,
+                // re-download from the pinned source, and retry once.
+                log.Add($"classdata.tpk unreadable ({ex.Message}) — re-downloading a compatible one...");
+                try { File.Delete(tpkPath); } catch { /* best effort */ }
+
+                if (!await TryDownloadClassDataTpk(tpkPath, log))
+                    return new ReadResult { Items = items, Log = log };
+
+                try
+                {
+                    manager.LoadClassPackage(tpkPath);
+                }
+                catch (Exception ex2)
+                {
+                    log.Add($"ERROR setting up AssetsManager: {ex2.Message}");
+                    return new ReadResult { Items = items, Log = log };
+                }
+            }
+
+            try
+            {
                 manager.MonoTempGenerator = new MonoCecilTempGenerator(managedPath);
             }
             catch (Exception ex)
@@ -261,7 +287,12 @@ namespace RepoCosmeticTracker.Services
 
         private static async Task<bool> TryDownloadClassDataTpk(string destinationPath, List<string> log)
         {
-            const string url = "https://nightly.link/AssetRipper/Tpk/workflows/type_tree_tpk/master/uncompressed_file.zip";
+            // Pinned UABEA release: its classdata.tpk is in the TPK v1 format
+            // AssetsTools.NET reads. (AssetRipper's nightly tpk artifact moved
+            // to a v2 format in July 2026 that AssetsTools.NET 3.0.4 rejects
+            // with "Unsupported or invalid file version 2", so we deliberately
+            // do NOT use the nightly link anymore.)
+            const string url = "https://github.com/nesrak1/UABEA/releases/download/v8/uabea-windows.zip";
 
             using var http = new HttpClient();
             http.Timeout = TimeSpan.FromSeconds(120);

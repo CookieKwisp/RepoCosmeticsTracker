@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 
 namespace RepoCosmeticTracker.Models
 {
@@ -19,6 +20,43 @@ namespace RepoCosmeticTracker.Models
         public string DisplayName { get; set; } = "";       // CosmeticAsset.assetName
         public string Category { get; set; } = "Uncategorized"; // CosmeticAsset.type (slot, e.g. "Hat", "Eyewear")
         public string Rarity { get; set; } = "";             // CosmeticAsset.rarity (Common/Uncommon/Rare/UltraRare)
+
+        /// <summary>Sort key so UltraRare floats to the top of the grid.</summary>
+        [JsonIgnore]
+        public int RarityRank => Rarity switch
+        {
+            "UltraRare" => 3,
+            "Rare" => 2,
+            "Uncommon" => 1,
+            "Common" => 0,
+            _ => -1
+        };
+
+        private string? _iconPath;
+
+        /// <summary>
+        /// Full path to the game's own cached icon PNG for this cosmetic
+        /// (resolved at runtime from LocalLow\semiwork\Repo\Cache\Icons —
+        /// machine-specific, so never persisted).
+        /// </summary>
+        [JsonIgnore]
+        public string? IconPath
+        {
+            get => _iconPath;
+            set
+            {
+                if (_iconPath == value) return;
+                _iconPath = value;
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>"BodyTopOverlay" shown as "Body Top Overlay".</summary>
+        [JsonIgnore]
+        public string CategoryDisplay => SpaceOutPascalCase(Category);
+
+        public static string SpaceOutPascalCase(string value)
+            => System.Text.RegularExpressions.Regex.Replace(value, "(?<=[a-z])(?=[A-Z])", " ");
 
         public bool Owned
         {
