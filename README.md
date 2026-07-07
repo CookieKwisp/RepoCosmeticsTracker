@@ -28,6 +28,8 @@ works — no AssetRipper, no exports, no manual imports.
 ```
 dotnet run --project RepoCosmeticTracker
 ```
+Or download from [Here](https://github.com/CookieKwisp/RepoCosmeticsTracker/releases/download/v1.0/RepoCosmeticTracker.exe) then run *RepoCosmeticTracker.exe*
+
 
 Requires .NET 8, Windows, and R.E.P.O. installed via Steam (run the game once
 so a save exists). First launch downloads a small Unity type database
