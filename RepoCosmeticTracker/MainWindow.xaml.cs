@@ -14,6 +14,7 @@ using System.Windows.Data;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Threading;
 using RepoCosmeticTracker.Models;
 using RepoCosmeticTracker.Services;
 
@@ -80,7 +81,7 @@ namespace RepoCosmeticTracker
             SubtitleText.Text = install ?? "game not detected — tracking manually";
 
             _iconIndex = await Task.Run(CosmeticIconIndex.BuildIndex);
-            ApplyIcons();
+            await ApplyIconsAndBakeCardsAsync();
 
             await SyncFromSaveAsync();
             StartWatcher();
@@ -213,7 +214,7 @@ namespace RepoCosmeticTracker
 
                 // The game may have cached more icons since we last looked.
                 _iconIndex = await Task.Run(CosmeticIconIndex.BuildIndex);
-                ApplyIcons();
+                await ApplyIconsAndBakeCardsAsync();
 
                 PopulateCategories();
                 SaveCatalog();
@@ -324,6 +325,7 @@ namespace RepoCosmeticTracker
                 if (!item.Owned && item.NumericId.HasValue && unlockedSet.Contains(item.NumericId.Value))
                 {
                     item.Owned = true;
+                    RebakeCard(item);
                     newlyOwned++;
                 }
             }
@@ -347,21 +349,56 @@ namespace RepoCosmeticTracker
 
         private void Card_Click(object sender, RoutedEventArgs e)
         {
-            if ((sender as FrameworkElement)?.DataContext is not CosmeticItem item)
+            if (sender is not Button button || button.DataContext is not CosmeticItem item)
                 return;
 
             item.Owned = !item.Owned;
+            RebakeCard(item);
 
             if (item.Owned)
+            {
                 SoundService.PlayCheck();
+                PlayCheckPop(button);
+            }
             else
+            {
                 SoundService.PlayUncheck();
+            }
 
             SaveCatalog();
             UpdateCounts();
 
             if (_hideOwned)
                 _view.Refresh();
+        }
+
+        /// <summary>
+        /// A transient "confirmation" flourish over a card that was just
+        /// checked off — pops in, holds briefly, fades out. Purely decorative:
+        /// the card's baked bitmap (via RebakeCard, called just before this)
+        /// already shows the permanent dim + badge, so this overlay never
+        /// needs to persist and can't go stale like a held animation would.
+        /// </summary>
+        private static void PlayCheckPop(Button button)
+        {
+            if (button.Template?.FindName("CheckBadge", button) is not Border badge
+                || button.Template?.FindName("CheckScale", button) is not ScaleTransform scale)
+                return;
+
+            var opacity = new DoubleAnimationUsingKeyFrames { FillBehavior = FillBehavior.Stop };
+            opacity.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.Zero)));
+            opacity.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(120))));
+            opacity.KeyFrames.Add(new LinearDoubleKeyFrame(1, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(550))));
+            opacity.KeyFrames.Add(new LinearDoubleKeyFrame(0, KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(750))));
+            badge.BeginAnimation(UIElement.OpacityProperty, opacity);
+
+            var pop = new DoubleAnimation(0.4, 1.0, TimeSpan.FromMilliseconds(280))
+            {
+                EasingFunction = new BackEase { Amplitude = 0.7, EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop
+            };
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
         }
 
         // ===== Filters =====
@@ -438,11 +475,46 @@ namespace RepoCosmeticTracker
             return display.Replace(" ", "");
         }
 
-        private void ApplyIcons()
+        /// <summary>
+        /// Resolves each item's icon, decodes every icon in parallel on
+        /// background threads, then bakes every card's full appearance into a
+        /// single bitmap (CardRenderer) — in chunks, yielding to the message
+        /// pump between batches so the window stays responsive and shows
+        /// progress. This is the one place real work happens; after it
+        /// completes, scrolling and resizing never touch layout, text, or
+        /// image decoding again — only an ownership change or a fresh scan
+        /// ever re-baked anything, and only for the single card that changed.
+        /// </summary>
+        private async Task ApplyIconsAndBakeCardsAsync()
         {
             foreach (CosmeticItem item in _cosmetics)
                 item.IconPath = CosmeticIconIndex.Resolve(_iconIndex, item);
+
+            var paths = _cosmetics
+                .Select(c => c.IconPath)
+                .Where(p => p != null)
+                .Select(p => p!)
+                .Distinct()
+                .ToList();
+            await IconCache.PreloadAsync(paths);
+
+            int total = _cosmetics.Count;
+            int i = 0;
+            foreach (CosmeticItem item in _cosmetics)
+            {
+                item.CardBitmap = CardRenderer.Render(item, IconCache.Get(item.IconPath));
+                i++;
+                if (i % 24 == 0)
+                {
+                    SetStatus($"Rendering cards… {i}/{total}");
+                    await Dispatcher.Yield(DispatcherPriority.Background);
+                }
+            }
         }
+
+        /// <summary>Re-bakes one card after its Owned state changes — cheap, single item.</summary>
+        private void RebakeCard(CosmeticItem item)
+            => item.CardBitmap = CardRenderer.Render(item, IconCache.Get(item.IconPath));
 
         private void PopulateCategories()
         {

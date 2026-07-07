@@ -12,60 +12,39 @@
 
     <Window.Resources>
         <local:RarityBrushConverter x:Key="RarityBrush"/>
-        <local:RarityColorConverter x:Key="RarityColor"/>
-        <local:IconImageConverter x:Key="IconImage"/>
 
-        <!-- One cosmetic = one clickable card. Rarity paints the border, the
-             glow, and the rarity label; owning it fades the whole card back
-             and pops in a check badge. -->
+        <!-- One cosmetic = one clickable card. A card's entire resting
+             appearance — border, icon, name, rarity, owned dim + check
+             badge — is pre-baked into one bitmap by CardRenderer at
+             startup (and re-baked for a single card on toggle). So this
+             template is just that bitmap plus two purely-decorative live
+             elements (a hover outline, a transient click "pop" badge) —
+             realizing a container during scroll never does layout or text
+             work, no matter how many cards are on screen or how fast the
+             user scrolls. -->
         <Style x:Key="CardButton" TargetType="Button">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Grid Margin="7" RenderTransformOrigin="0.5,0.5">
+                        <Grid Width="150" Height="182" Margin="7" RenderTransformOrigin="0.5,0.5">
                             <Grid.RenderTransform>
                                 <ScaleTransform x:Name="Scale"/>
                             </Grid.RenderTransform>
 
-                            <Border x:Name="Card" Width="150" Height="182" CornerRadius="12"
-                                    Background="{StaticResource CardBrush}"
-                                    BorderThickness="1.4"
-                                    BorderBrush="{Binding Rarity, Converter={StaticResource RarityBrush}}">
-                                <Grid Margin="10,8">
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="88"/>
-                                        <RowDefinition Height="*"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <Grid>
-                                        <TextBlock x:Name="NoIcon" Text="?" FontSize="30" FontWeight="Bold"
-                                                   Foreground="#3C3C48" HorizontalAlignment="Center"
-                                                   VerticalAlignment="Center" Visibility="Collapsed"/>
-                                        <Image Source="{Binding IconPath, Converter={StaticResource IconImage}}"
-                                               Stretch="Uniform" Margin="4"/>
-                                    </Grid>
-                                    <TextBlock Grid.Row="1" Text="{Binding DisplayName}" FontSize="12" FontWeight="SemiBold"
-                                               TextWrapping="Wrap" TextTrimming="CharacterEllipsis" MaxHeight="32"
-                                               TextAlignment="Center" Margin="0,6,0,2"
-                                               Foreground="{StaticResource TextBrush}"/>
-                                    <StackPanel Grid.Row="2">
-                                        <TextBlock Text="{Binding CategoryDisplay}" FontSize="10" TextAlignment="Center"
-                                                   Foreground="{StaticResource TextDimBrush}"/>
-                                        <TextBlock Text="{Binding Rarity}" FontSize="10" FontWeight="Bold"
-                                                   TextAlignment="Center" Margin="0,1,0,0"
-                                                   Foreground="{Binding Rarity, Converter={StaticResource RarityBrush}}"/>
-                                    </StackPanel>
-                                </Grid>
-                            </Border>
+                            <Image Source="{Binding CardBitmap}" Width="150" Height="182" Stretch="Uniform"/>
+
+                            <Border x:Name="HoverOutline" CornerRadius="12" BorderThickness="2.2"
+                                    BorderBrush="{Binding Rarity, Converter={StaticResource RarityBrush}}"
+                                    Opacity="0"/>
 
                             <Border x:Name="CheckBadge" Width="24" Height="24" CornerRadius="12"
                                     Background="{StaticResource SuccessBrush}"
                                     HorizontalAlignment="Right" VerticalAlignment="Top"
                                     Margin="0,2,2,0" Opacity="0" RenderTransformOrigin="0.5,0.5">
                                 <Border.RenderTransform>
-                                    <ScaleTransform x:Name="CheckScale" ScaleX="0.5" ScaleY="0.5"/>
+                                    <ScaleTransform x:Name="CheckScale" ScaleX="1" ScaleY="1"/>
                                 </Border.RenderTransform>
                                 <TextBlock Text="&#x2713;" FontSize="13" FontWeight="Bold" Foreground="#10241A"
                                            HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0"/>
@@ -74,7 +53,7 @@
 
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="Card" Property="BorderThickness" Value="2.2"/>
+                                <Setter TargetName="HoverOutline" Property="Opacity" Value="1"/>
                                 <Trigger.EnterActions>
                                     <BeginStoryboard>
                                         <Storyboard>
@@ -127,49 +106,6 @@
                                     </BeginStoryboard>
                                 </Trigger.ExitActions>
                             </Trigger>
-
-                            <DataTrigger Binding="{Binding Owned}" Value="True">
-                                <DataTrigger.EnterActions>
-                                    <BeginStoryboard>
-                                        <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="Card" Storyboard.TargetProperty="Opacity"
-                                                             To="0.35" Duration="0:0:0.25"/>
-                                            <DoubleAnimation Storyboard.TargetName="CheckBadge" Storyboard.TargetProperty="Opacity"
-                                                             To="1" Duration="0:0:0.18"/>
-                                            <DoubleAnimation Storyboard.TargetName="CheckScale" Storyboard.TargetProperty="ScaleX"
-                                                             To="1" Duration="0:0:0.28">
-                                                <DoubleAnimation.EasingFunction>
-                                                    <BackEase Amplitude="0.7" EasingMode="EaseOut"/>
-                                                </DoubleAnimation.EasingFunction>
-                                            </DoubleAnimation>
-                                            <DoubleAnimation Storyboard.TargetName="CheckScale" Storyboard.TargetProperty="ScaleY"
-                                                             To="1" Duration="0:0:0.28">
-                                                <DoubleAnimation.EasingFunction>
-                                                    <BackEase Amplitude="0.7" EasingMode="EaseOut"/>
-                                                </DoubleAnimation.EasingFunction>
-                                            </DoubleAnimation>
-                                        </Storyboard>
-                                    </BeginStoryboard>
-                                </DataTrigger.EnterActions>
-                                <DataTrigger.ExitActions>
-                                    <BeginStoryboard>
-                                        <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="Card" Storyboard.TargetProperty="Opacity"
-                                                             To="1" Duration="0:0:0.2"/>
-                                            <DoubleAnimation Storyboard.TargetName="CheckBadge" Storyboard.TargetProperty="Opacity"
-                                                             To="0" Duration="0:0:0.15"/>
-                                            <DoubleAnimation Storyboard.TargetName="CheckScale" Storyboard.TargetProperty="ScaleX"
-                                                             To="0.5" Duration="0:0:0.15"/>
-                                            <DoubleAnimation Storyboard.TargetName="CheckScale" Storyboard.TargetProperty="ScaleY"
-                                                             To="0.5" Duration="0:0:0.15"/>
-                                        </Storyboard>
-                                    </BeginStoryboard>
-                                </DataTrigger.ExitActions>
-                            </DataTrigger>
-
-                            <DataTrigger Binding="{Binding IconPath}" Value="{x:Null}">
-                                <Setter TargetName="NoIcon" Property="Visibility" Value="Visible"/>
-                            </DataTrigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
@@ -306,7 +242,8 @@
                      VirtualizingPanel.VirtualizationMode="Recycling"
                      VirtualizingPanel.ScrollUnit="Pixel"
                      VirtualizingPanel.CacheLength="1,1"
-                     VirtualizingPanel.CacheLengthUnit="Page">
+                     VirtualizingPanel.CacheLengthUnit="Page"
+                     ScrollViewer.CanContentScroll="True">
                 <ListBox.RenderTransform>
                     <TranslateTransform x:Name="CardsTranslate"/>
                 </ListBox.RenderTransform>
