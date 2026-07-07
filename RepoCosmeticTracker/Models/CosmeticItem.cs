@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
+using System.Windows.Media;
 
 namespace RepoCosmeticTracker.Models
 {
@@ -54,6 +55,25 @@ namespace RepoCosmeticTracker.Models
         /// <summary>"BodyTopOverlay" shown as "Body Top Overlay".</summary>
         [JsonIgnore]
         public string CategoryDisplay => SpaceOutPascalCase(Category);
+
+        private ImageSource? _cardBitmap;
+
+        /// <summary>
+        /// The card's whole resting appearance pre-baked into one bitmap by
+        /// CardRenderer (see that class for why). Never persisted — rebuilt
+        /// at startup and whenever Owned changes.
+        /// </summary>
+        [JsonIgnore]
+        public ImageSource? CardBitmap
+        {
+            get => _cardBitmap;
+            set
+            {
+                if (_cardBitmap == value) return;
+                _cardBitmap = value;
+                OnPropertyChanged();
+            }
+        }
 
         public static string SpaceOutPascalCase(string value)
             => System.Text.RegularExpressions.Regex.Replace(value, "(?<=[a-z])(?=[A-Z])", " ");
