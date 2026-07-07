@@ -347,21 +347,47 @@ namespace RepoCosmeticTracker
 
         private void Card_Click(object sender, RoutedEventArgs e)
         {
-            if ((sender as FrameworkElement)?.DataContext is not CosmeticItem item)
+            if (sender is not Button button || button.DataContext is not CosmeticItem item)
                 return;
 
             item.Owned = !item.Owned;
 
             if (item.Owned)
+            {
                 SoundService.PlayCheck();
+                PlayCheckPop(button);
+            }
             else
+            {
                 SoundService.PlayUncheck();
+            }
 
             SaveCatalog();
             UpdateCounts();
 
             if (_hideOwned)
                 _view.Refresh();
+        }
+
+        /// <summary>
+        /// The bounce-in flourish for the check badge. Driven here (not from a
+        /// XAML trigger) so it fires only on a genuine click — the Setters own
+        /// the resting state, and FillBehavior.Stop lets the animation hand
+        /// back cleanly to those Setters instead of leaving a held value that
+        /// would smear across recycled scroll containers.
+        /// </summary>
+        private static void PlayCheckPop(Button button)
+        {
+            if (button.Template?.FindName("CheckScale", button) is not ScaleTransform scale)
+                return;
+
+            var pop = new DoubleAnimation(0.4, 1.0, TimeSpan.FromMilliseconds(280))
+            {
+                EasingFunction = new BackEase { Amplitude = 0.7, EasingMode = EasingMode.EaseOut },
+                FillBehavior = FillBehavior.Stop
+            };
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
         }
 
         // ===== Filters =====
@@ -442,6 +468,17 @@ namespace RepoCosmeticTracker
         {
             foreach (CosmeticItem item in _cosmetics)
                 item.IconPath = CosmeticIconIndex.Resolve(_iconIndex, item);
+
+            // Decode every icon up front on background threads so scrolling and
+            // resizing never pay a decode on the UI thread. Fire-and-forget: the
+            // visible cards decode on demand instantly, the rest warm in behind.
+            var paths = _cosmetics
+                .Select(c => c.IconPath)
+                .Where(p => p != null)
+                .Select(p => p!)
+                .Distinct()
+                .ToList();
+            _ = IconCache.PreloadAsync(paths);
         }
 
         private void PopulateCategories()

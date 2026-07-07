@@ -1,10 +1,9 @@
 using System;
-using System.Collections.Generic;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
+using RepoCosmeticTracker.Services;
 
 namespace RepoCosmeticTracker
 {
@@ -23,40 +22,14 @@ namespace RepoCosmeticTracker
     }
 
     /// <summary>
-    /// Icon path → decoded bitmap. Decodes at card size (not the PNG's full
-    /// resolution) and caches frozen bitmaps, so hundreds of cards stay cheap
-    /// on both memory and startup time.
+    /// Icon path → decoded bitmap, served from the shared <see cref="IconCache"/>
+    /// (pre-warmed on background threads), so binding during scroll/resize is a
+    /// pure lookup with no decode work on the UI thread.
     /// </summary>
     public class IconImageConverter : IValueConverter
     {
-        private static readonly Dictionary<string, BitmapImage> Cache = new(StringComparer.OrdinalIgnoreCase);
-
         public object? Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            if (value is not string path || path.Length == 0)
-                return null;
-
-            if (Cache.TryGetValue(path, out BitmapImage? cached))
-                return cached;
-
-            try
-            {
-                var bmp = new BitmapImage();
-                bmp.BeginInit();
-                bmp.UriSource = new Uri(path);
-                bmp.DecodePixelWidth = 160; // 2x the card's icon area, stays crisp
-                bmp.CacheOption = BitmapCacheOption.OnLoad;
-                bmp.EndInit();
-                bmp.Freeze();
-                Cache[path] = bmp;
-                return bmp;
-            }
-            catch
-            {
-                // Unreadable/corrupt cache file — card just shows no image.
-                return null;
-            }
-        }
+            => IconCache.Get(value as string);
 
         public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
             => Binding.DoNothing;

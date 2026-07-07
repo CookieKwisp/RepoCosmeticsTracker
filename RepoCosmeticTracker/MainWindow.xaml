@@ -24,7 +24,25 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
+                        <!-- BitmapCache renders this whole card (border, text
+                             layout, icon, badge) to a GPU texture once, then
+                             reuses it. Without this, every visible card
+                             re-runs full layout + text rendering every single
+                             frame during scroll — fine for a dozen cards, but
+                             at 4K fullscreen with hundreds on screen it can
+                             push WPF past its video-memory budget, which
+                             silently and *permanently* downgrades the whole
+                             app to software rendering for the rest of the
+                             process (hence the slowdown never recovering).
+                             Caching keeps steady-state GPU work near zero, so
+                             that threshold is never crossed. It sits on the
+                             same element as the hover ScaleTransform so
+                             hover/scale animate the cached texture directly
+                             instead of re-rendering. -->
                         <Grid Margin="7" RenderTransformOrigin="0.5,0.5">
+                            <Grid.CacheMode>
+                                <BitmapCache EnableClearType="False" SnapsToDevicePixels="True"/>
+                            </Grid.CacheMode>
                             <Grid.RenderTransform>
                                 <ScaleTransform x:Name="Scale"/>
                             </Grid.RenderTransform>
@@ -65,7 +83,7 @@
                                     HorizontalAlignment="Right" VerticalAlignment="Top"
                                     Margin="0,2,2,0" Opacity="0" RenderTransformOrigin="0.5,0.5">
                                 <Border.RenderTransform>
-                                    <ScaleTransform x:Name="CheckScale" ScaleX="0.5" ScaleY="0.5"/>
+                                    <ScaleTransform x:Name="CheckScale" ScaleX="1" ScaleY="1"/>
                                 </Border.RenderTransform>
                                 <TextBlock Text="&#x2713;" FontSize="13" FontWeight="Bold" Foreground="#10241A"
                                            HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-1,0,0"/>
@@ -128,43 +146,15 @@
                                 </Trigger.ExitActions>
                             </Trigger>
 
+                            <!-- Resting owned state is driven by Setters, not held
+                                 animations, so recycled containers always render
+                                 the correct state instantly (a held animation would
+                                 outrank the new item's binding and leave a stale
+                                 check badge on scroll). The click "pop" is animated
+                                 from code-behind so it only fires on real toggles. -->
                             <DataTrigger Binding="{Binding Owned}" Value="True">
-                                <DataTrigger.EnterActions>
-                                    <BeginStoryboard>
-                                        <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="Card" Storyboard.TargetProperty="Opacity"
-                                                             To="0.35" Duration="0:0:0.25"/>
-                                            <DoubleAnimation Storyboard.TargetName="CheckBadge" Storyboard.TargetProperty="Opacity"
-                                                             To="1" Duration="0:0:0.18"/>
-                                            <DoubleAnimation Storyboard.TargetName="CheckScale" Storyboard.TargetProperty="ScaleX"
-                                                             To="1" Duration="0:0:0.28">
-                                                <DoubleAnimation.EasingFunction>
-                                                    <BackEase Amplitude="0.7" EasingMode="EaseOut"/>
-                                                </DoubleAnimation.EasingFunction>
-                                            </DoubleAnimation>
-                                            <DoubleAnimation Storyboard.TargetName="CheckScale" Storyboard.TargetProperty="ScaleY"
-                                                             To="1" Duration="0:0:0.28">
-                                                <DoubleAnimation.EasingFunction>
-                                                    <BackEase Amplitude="0.7" EasingMode="EaseOut"/>
-                                                </DoubleAnimation.EasingFunction>
-                                            </DoubleAnimation>
-                                        </Storyboard>
-                                    </BeginStoryboard>
-                                </DataTrigger.EnterActions>
-                                <DataTrigger.ExitActions>
-                                    <BeginStoryboard>
-                                        <Storyboard>
-                                            <DoubleAnimation Storyboard.TargetName="Card" Storyboard.TargetProperty="Opacity"
-                                                             To="1" Duration="0:0:0.2"/>
-                                            <DoubleAnimation Storyboard.TargetName="CheckBadge" Storyboard.TargetProperty="Opacity"
-                                                             To="0" Duration="0:0:0.15"/>
-                                            <DoubleAnimation Storyboard.TargetName="CheckScale" Storyboard.TargetProperty="ScaleX"
-                                                             To="0.5" Duration="0:0:0.15"/>
-                                            <DoubleAnimation Storyboard.TargetName="CheckScale" Storyboard.TargetProperty="ScaleY"
-                                                             To="0.5" Duration="0:0:0.15"/>
-                                        </Storyboard>
-                                    </BeginStoryboard>
-                                </DataTrigger.ExitActions>
+                                <Setter TargetName="Card" Property="Opacity" Value="0.35"/>
+                                <Setter TargetName="CheckBadge" Property="Opacity" Value="1"/>
                             </DataTrigger>
 
                             <DataTrigger Binding="{Binding IconPath}" Value="{x:Null}">
@@ -306,7 +296,8 @@
                      VirtualizingPanel.VirtualizationMode="Recycling"
                      VirtualizingPanel.ScrollUnit="Pixel"
                      VirtualizingPanel.CacheLength="1,1"
-                     VirtualizingPanel.CacheLengthUnit="Page">
+                     VirtualizingPanel.CacheLengthUnit="Page"
+                     ScrollViewer.CanContentScroll="True">
                 <ListBox.RenderTransform>
                     <TranslateTransform x:Name="CardsTranslate"/>
                 </ListBox.RenderTransform>
