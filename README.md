@@ -3,6 +3,7 @@
 A zero-click collection tracker for R.E.P.O.'s cosmetics. Open it and it just
 works — no AssetRipper, no exports, no manual imports.
 
+![Card grid view](docs/RepoCosmeticTracker.png)
 ## What it does
 
 - **Builds its own catalog** by reading the cosmetics list (names, slots,
