@@ -13,15 +13,6 @@
     <Window.Resources>
         <local:RarityBrushConverter x:Key="RarityBrush"/>
 
-        <!-- One cosmetic = one clickable card. A card's entire resting
-             appearance — border, icon, name, rarity, owned dim + check
-             badge — is pre-baked into one bitmap by CardRenderer at
-             startup (and re-baked for a single card on toggle). So this
-             template is just that bitmap plus two purely-decorative live
-             elements (a hover outline, a transient click "pop" badge) —
-             realizing a container during scroll never does layout or text
-             work, no matter how many cards are on screen or how fast the
-             user scrolls. -->
         <Style x:Key="CardButton" TargetType="Button">
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Cursor" Value="Hand"/>

@@ -6,7 +6,6 @@ using System.Windows.Media;
 
 namespace RepoCosmeticTracker
 {
-    /// <summary>Maps a rarity string ("Rare") to its themed brush from App.xaml.</summary>
     public class RarityBrushConverter : IValueConverter
     {
         public object Convert(object value, Type targetType, object parameter, CultureInfo culture)

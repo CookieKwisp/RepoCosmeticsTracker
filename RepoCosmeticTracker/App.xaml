@@ -5,7 +5,7 @@
     <Application.Resources>
         <ResourceDictionary>
 
-            <!-- ===== Palette ===== -->
+
             <SolidColorBrush x:Key="BgBrush" Color="#141419"/>
             <SolidColorBrush x:Key="PanelBrush" Color="#1B1B21"/>
             <SolidColorBrush x:Key="CardBrush" Color="#202027"/>
@@ -17,9 +17,6 @@
             <SolidColorBrush x:Key="AccentBrush" Color="#FF5A48"/>
             <SolidColorBrush x:Key="SuccessBrush" Color="#3ECF77"/>
 
-            <!-- ===== Rarity colors, matching the game's own scheme:
-                 Common green, Uncommon cyan, Rare magenta, Ultra Rare yellow.
-                 (Color + Brush pairs; converters look these up by name) ===== -->
             <Color x:Key="RarityCommonColor">#7EDD4C</Color>
             <Color x:Key="RarityUncommonColor">#45E0DC</Color>
             <Color x:Key="RarityRareColor">#F04FE0</Color>
@@ -35,7 +32,7 @@
                 <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
             </Style>
 
-            <!-- ===== Pill toggle (filter chips, mute) ===== -->
+
             <Style x:Key="Chip" TargetType="ToggleButton">
                 <Setter Property="Foreground" Value="{StaticResource TextDimBrush}"/>
                 <Setter Property="Cursor" Value="Hand"/>
@@ -67,7 +64,7 @@
                 </Setter>
             </Style>
 
-            <!-- ===== Quiet button (rescan) ===== -->
+
             <Style x:Key="GhostButton" TargetType="Button">
                 <Setter Property="Foreground" Value="{StaticResource TextDimBrush}"/>
                 <Setter Property="Cursor" Value="Hand"/>
@@ -96,7 +93,7 @@
                 </Setter>
             </Style>
 
-            <!-- ===== Rounded search box ===== -->
+
             <Style x:Key="SearchBoxStyle" TargetType="TextBox">
                 <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
                 <Setter Property="CaretBrush" Value="{StaticResource TextBrush}"/>
@@ -130,7 +127,6 @@
                 </Setter>
             </Style>
 
-            <!-- ===== Dark rounded ComboBox ===== -->
             <Style TargetType="ComboBox">
                 <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
                 <Setter Property="Height" Value="30"/>
@@ -207,7 +203,7 @@
                 </Setter>
             </Style>
 
-            <!-- ===== Slim scrollbar ===== -->
+
             <Style TargetType="ScrollBar">
                 <Setter Property="Background" Value="Transparent"/>
                 <Setter Property="Width" Value="10"/>

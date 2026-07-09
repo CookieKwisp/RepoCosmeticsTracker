@@ -1,37 +1,18 @@
-using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
 namespace RepoCosmeticTracker.Services
 {
-    /// <summary>
-    /// Finds R.E.P.O.'s install folder (via Steam) and its save folder,
-    /// without requiring the user to browse for anything by hand.
-    /// </summary>
     public static class GameLocator
     {
-        // R.E.P.O.'s Steam App ID.
         private const string RepoAppId = "3241660";
-
-        /// <summary>
-        /// The root Repo AppData folder (parent of "saves"). Persistent
-        /// player-profile data — likely including cosmetic ownership —
-        /// is expected to live somewhere under here, possibly as a sibling
-        /// file to the "saves" folder rather than inside it.
-        /// </summary>
         public static string? GetRepoDataRoot()
         {
             string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             string path = Path.GetFullPath(Path.Combine(localAppData, "..", "LocalLow", "semiwork", "Repo"));
             return Directory.Exists(path) ? path : null;
         }
-
-        /// <summary>
-        /// The folder that contains one subfolder per save slot
-        /// (e.g. REPO_SAVE_XXXXXXX), each holding .es3 files.
-        /// </summary>
         public static string? GetSaveFolder()
         {
             string? root = GetRepoDataRoot();
@@ -77,11 +58,6 @@ namespace RepoCosmeticTracker.Services
 
             return null;
         }
-
-        /// <summary>
-        /// Steam can split games across multiple drives. This reads
-        /// libraryfolders.vdf so we check all of them, not just the default.
-        /// </summary>
         public static IEnumerable<string> GetSteamLibraryFolders()
         {
             string? steamPath = GetSteamInstallPath();
@@ -103,10 +79,6 @@ namespace RepoCosmeticTracker.Services
             }
         }
 
-        /// <summary>
-        /// Reads appmanifest_3241660.acf to get REPO's actual install folder
-        /// name, rather than guessing "REPO" vs "R.E.P.O." etc.
-        /// </summary>
         public static string? FindRepoInstallFolder()
         {
             foreach (string library in GetSteamLibraryFolders())
@@ -140,11 +112,6 @@ namespace RepoCosmeticTracker.Services
             return null;
         }
 
-        /// <summary>
-        /// REPO's Unity data folder (contains level0/level1/level2,
-        /// resources.assets, Managed/, etc.) — everything DirectAssetReader
-        /// needs to build the catalog without AssetRipper.
-        /// </summary>
         public static string? FindRepoDataFolder()
         {
             string? installDir = FindRepoInstallFolder();

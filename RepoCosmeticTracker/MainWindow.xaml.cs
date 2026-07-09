@@ -1,12 +1,8 @@
-using System;
-using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
-using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -20,15 +16,6 @@ using RepoCosmeticTracker.Services;
 
 namespace RepoCosmeticTracker
 {
-    /// <summary>
-    /// The whole app is one screen: a grid of rarity-colored cards, filters,
-    /// and a status bar. Everything else is automatic —
-    ///  - on launch: load cached catalog.json instantly, rebuild it from the
-    ///    game's own data files only when they've changed since the cache,
-    ///  - ownership syncs from MetaSave.es3 (decrypted in place) and re-syncs
-    ///    whenever the game writes a save, via an event-driven file watcher,
-    ///  - clicking a card toggles it and persists immediately.
-    /// </summary>
     public partial class MainWindow : Window
     {
         private const double ProgressBarWidth = 200;
@@ -78,7 +65,7 @@ namespace RepoCosmeticTracker
             LoadCatalogFromDisk();
 
             string? install = GameLocator.FindRepoInstallFolder();
-            SubtitleText.Text = install ?? "game not detected — tracking manually";
+            SubtitleText.Text = install ?? "game not detected tracking manually";
 
             _iconIndex = await Task.Run(CosmeticIconIndex.BuildIndex);
             await ApplyIconsAndBakeCardsAsync();
@@ -173,7 +160,7 @@ namespace RepoCosmeticTracker
             if (dataPath == null)
             {
                 if (userRequested)
-                    SetStatus("Game install not found — can't rescan.");
+                    SetStatus("Game install not found can't rescan.");
                 return;
             }
 
@@ -222,8 +209,8 @@ namespace RepoCosmeticTracker
 
                 int added = result.Items.Count(i => !oldIds.Contains(i.Id));
                 SetStatus(added > 0 && oldIds.Count > 0
-                    ? $"Catalog updated — {added} new cosmetic{(added == 1 ? "" : "s")} found."
-                    : $"Catalog built — {result.Items.Count} cosmetics.");
+                    ? $"Catalog updated {added} new cosmetic{(added == 1 ? "" : "s")} found."
+                    : $"Catalog built {result.Items.Count} cosmetics.");
 
                 await SyncFromSaveAsync();
             }
@@ -272,14 +259,14 @@ namespace RepoCosmeticTracker
             string? root = GameLocator.GetRepoDataRoot();
             if (root == null)
             {
-                SetStatus("Save folder not found — run R.E.P.O. once to create it.");
+                SetStatus("Save folder not found run R.E.P.O. once to create it.");
                 return;
             }
 
             string metaPath = Path.Combine(root, "MetaSave.es3");
             if (!File.Exists(metaPath))
             {
-                SetStatus("MetaSave.es3 not found yet — waiting for the game to save.");
+                SetStatus("MetaSave.es3 not found yet waiting for the game to save.");
                 return;
             }
 
@@ -298,7 +285,7 @@ namespace RepoCosmeticTracker
 
             if (json == null)
             {
-                SetStatus("Couldn't read MetaSave.es3 (file busy) — will retry on next save.");
+                SetStatus("Couldn't read MetaSave.es3 (file busy) will retry on next save.");
                 return;
             }
 
@@ -337,7 +324,7 @@ namespace RepoCosmeticTracker
                 if (_hideOwned)
                     _view.Refresh();
                 SoundService.PlayChime();
-                SetStatus($"Synced from save — {newlyOwned} new unlock{(newlyOwned == 1 ? "" : "s")} ✓");
+                SetStatus($"Synced from save {newlyOwned} new unlock{(newlyOwned == 1 ? "" : "s")} ✓");
             }
             else
             {
@@ -371,14 +358,6 @@ namespace RepoCosmeticTracker
             if (_hideOwned)
                 _view.Refresh();
         }
-
-        /// <summary>
-        /// A transient "confirmation" flourish over a card that was just
-        /// checked off — pops in, holds briefly, fades out. Purely decorative:
-        /// the card's baked bitmap (via RebakeCard, called just before this)
-        /// already shows the permanent dim + badge, so this overlay never
-        /// needs to persist and can't go stale like a held animation would.
-        /// </summary>
         private static void PlayCheckPop(Button button)
         {
             if (button.Template?.FindName("CheckBadge", button) is not Border badge
@@ -474,17 +453,6 @@ namespace RepoCosmeticTracker
                 return null;
             return display.Replace(" ", "");
         }
-
-        /// <summary>
-        /// Resolves each item's icon, decodes every icon in parallel on
-        /// background threads, then bakes every card's full appearance into a
-        /// single bitmap (CardRenderer) — in chunks, yielding to the message
-        /// pump between batches so the window stays responsive and shows
-        /// progress. This is the one place real work happens; after it
-        /// completes, scrolling and resizing never touch layout, text, or
-        /// image decoding again — only an ownership change or a fresh scan
-        /// ever re-baked anything, and only for the single card that changed.
-        /// </summary>
         private async Task ApplyIconsAndBakeCardsAsync()
         {
             foreach (CosmeticItem item in _cosmetics)
@@ -512,7 +480,6 @@ namespace RepoCosmeticTracker
             }
         }
 
-        /// <summary>Re-bakes one card after its Owned state changes — cheap, single item.</summary>
         private void RebakeCard(CosmeticItem item)
             => item.CardBitmap = CardRenderer.Render(item, IconCache.Get(item.IconPath));
 
@@ -561,12 +528,6 @@ namespace RepoCosmeticTracker
 
         private void SetStatus(string message) => StatusText.Text = message;
 
-        // ===== Native dark title bar =====
-
-        // Window.Background only paints the client area — the title bar is
-        // drawn by DWM. This flips the native title bar into dark mode too
-        // (same mechanism VS Code and Windows Terminal use). No-ops silently
-        // on Windows builds older than 10 20H1.
         protected override void OnSourceInitialized(EventArgs e)
         {
             base.OnSourceInitialized(e);
@@ -580,7 +541,7 @@ namespace RepoCosmeticTracker
             }
             catch
             {
-                // Not on Windows / DWM unavailable — light title bar, no harm.
+                // Not on Windows / DWM unavailable
             }
         }
 

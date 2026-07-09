@@ -1,24 +1,12 @@
-using System;
 using System.IO;
 
 namespace RepoCosmeticTracker.Services
 {
-    /// <summary>
-    /// Watches R.E.P.O.'s AppData folder for .es3 writes so ownership can be
-    /// re-synced the moment the game saves. FileSystemWatcher is purely
-    /// event-driven (the OS pushes notifications; there is no polling), so
-    /// this costs effectively nothing while idle.
-    ///
-    /// The game writes saves in several bursts (temp file, rename, rewrite),
-    /// so raw events are debounced: we only fire once things have been quiet
-    /// for a moment.
-    /// </summary>
+
     public sealed class SaveWatcher : IDisposable
     {
         private readonly FileSystemWatcher _watcher;
         private readonly System.Timers.Timer _debounce;
-
-        /// <summary>Raised on a threadpool thread after save writes settle.</summary>
         public event Action? SaveChanged;
 
         public SaveWatcher(string repoDataRoot)

@@ -1,31 +1,14 @@
-using System;
-using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
 using System.Net.Http;
-using System.Threading.Tasks;
 using AssetsTools.NET;
 using AssetsTools.NET.Extra;
 using RepoCosmeticTracker.Models;
 
 namespace RepoCosmeticTracker.Services
 {
-    /// <summary>
-    /// Reads MetaManager's cosmeticAssets list and every CosmeticAsset
-    /// instance directly from REPO's own Unity data files, using
-    /// AssetsTools.NET + AssetsTools.NET.MonoCecil. No AssetRipper export,
-    /// no BepInEx — just the game's own installed files.
-    ///
-    /// This logic was proven working in a standalone console app first
-    /// (RepoCatalogBuilder) before being ported here, since none of it
-    /// could be tested without a real Windows machine + REPO install.
-    /// </summary>
     public static class DirectAssetReader
     {
-        // Confirmed against a real exported CosmeticAsset sample (type: 3 on
-        // a "Leg Right" item lined up with index 3) and CosmeticShopMachineAnimator's
-        // sound field naming (Common/Uncommon/Rare/UltraRare in that order).
         private static readonly string[] CosmeticTypeNames =
         {
             "Hat", "ArmRight", "ArmLeft", "LegRight", "LegLeft",
@@ -61,7 +44,7 @@ namespace RepoCosmeticTracker.Services
 
             if (!File.Exists(tpkPath))
             {
-                log.Add("classdata.tpk not found — downloading...");
+                log.Add("classdata.tpk not found downloading...");
                 bool downloaded = await TryDownloadClassDataTpk(tpkPath, log);
                 if (!downloaded)
                     return new ReadResult { Items = items, Log = log };
@@ -74,11 +57,7 @@ namespace RepoCosmeticTracker.Services
             }
             catch (Exception ex)
             {
-                // A tpk we can't read — most likely a leftover download in the
-                // newer TPK v2 format (AssetRipper's nightly switched formats
-                // in July 2026; AssetsTools.NET only reads v1). Toss it,
-                // re-download from the pinned source, and retry once.
-                log.Add($"classdata.tpk unreadable ({ex.Message}) — re-downloading a compatible one...");
+                log.Add($"classdata.tpk unreadable ({ex.Message}) re-downloading a compatible one");
                 try { File.Delete(tpkPath); } catch { /* best effort */ }
 
                 if (!await TryDownloadClassDataTpk(tpkPath, log))
@@ -287,11 +266,6 @@ namespace RepoCosmeticTracker.Services
 
         private static async Task<bool> TryDownloadClassDataTpk(string destinationPath, List<string> log)
         {
-            // Pinned UABEA release: its classdata.tpk is in the TPK v1 format
-            // AssetsTools.NET reads. (AssetRipper's nightly tpk artifact moved
-            // to a v2 format in July 2026 that AssetsTools.NET 3.0.4 rejects
-            // with "Unsupported or invalid file version 2", so we deliberately
-            // do NOT use the nightly link anymore.)
             const string url = "https://github.com/nesrak1/UABEA/releases/download/v8/uabea-windows.zip";
 
             using var http = new HttpClient();
@@ -312,7 +286,7 @@ namespace RepoCosmeticTracker.Services
                 byte[] zipBytes = await response.Content.ReadAsByteArrayAsync();
                 if (zipBytes.Length < 1000)
                 {
-                    log.Add($"Downloaded file is only {zipBytes.Length} bytes — too small to be real.");
+                    log.Add($"Downloaded file is only {zipBytes.Length} bytes too small to be real.");
                     return false;
                 }
 

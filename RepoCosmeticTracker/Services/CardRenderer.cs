@@ -1,4 +1,3 @@
-using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -7,25 +6,10 @@ using RepoCosmeticTracker.Models;
 
 namespace RepoCosmeticTracker.Services
 {
-    /// <summary>
-    /// Bakes a cosmetic card's entire resting appearance — border, icon,
-    /// name, category, rarity, and the owned dim + check badge — into a
-    /// single frozen bitmap, once.
-    ///
-    /// This exists so the live per-card visual in MainWindow.xaml can be
-    /// reduced to one Image element. Realizing a container during virtualized
-    /// scroll then costs nothing more than positioning an already-finished
-    /// bitmap — no text measurement, no geometry, regardless of how many
-    /// cards are on screen or how fast the user scrolls. Only an actual
-    /// ownership change re-bakes (a single card, imperceptibly fast).
-    /// </summary>
     public static class CardRenderer
     {
         public const double CardWidth = 150;
         public const double CardHeight = 182;
-
-        // Bake at 2x logical size so cards stay crisp after the compositor
-        // scales them for high-DPI/4K displays.
         private const double RenderScale = 2.0;
 
         private static readonly FontFamily UiFont = new("Segoe UI");
@@ -129,11 +113,8 @@ namespace RepoCosmeticTracker.Services
                 Child = innerGrid
             };
 
-            if (!item.Owned)
-                return card;
+            if (!item.Owned) return card;
 
-            // Owned: composite the dimmed card and the check badge together
-            // so the whole resting state is still just one baked bitmap.
             var badge = new Border
             {
                 Width = 24,

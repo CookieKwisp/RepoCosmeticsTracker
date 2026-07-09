@@ -1,7 +1,6 @@
 # R.E.P.O. Cosmetic Tracker
 
-A zero-click collection tracker for R.E.P.O.'s cosmetics. Open it and it just
-works — no AssetRipper, no exports, no manual imports.
+A zero-click collection tracker for R.E.P.O.'s cosmetics.
 
 ![Card grid view](docs/RepoCosmeticTracker.png)
 ## What it does
@@ -13,11 +12,11 @@ works — no AssetRipper, no exports, no manual imports.
 - **Syncs ownership from your save.** MetaSave.es3 is decrypted in place
   (ES3 AES scheme) and its `cosmeticUnlocks` list is applied to the grid. A
   file watcher (event-driven, no polling) re-syncs the moment the game writes
-  a save — unlock something in-game and its card grays out on its own, with a
+  a save, unlock something in-game and its card grays out on its own, with a
   chime.
 - **One click per cosmetic.** Cards are colored by rarity (Common / Uncommon /
   Rare / Ultra Rare); clicking toggles owned, which fades the card back and
-  saves instantly to `catalog.json` next to the exe. Save-sync is additive —
+  saves instantly to `catalog.json` next to the exe. Save-sync is additive,
   it never un-checks things you marked by hand.
 - **Filters**: search, rarity chips, category dropdown (Hat, Eyewear, Left
   Leg, …), and a "Hide owned" toggle.

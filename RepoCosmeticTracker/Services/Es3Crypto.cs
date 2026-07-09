@@ -1,24 +1,10 @@
-using System;
 using System.IO;
 using System.Security.Cryptography;
 
 namespace RepoCosmeticTracker.Services
 {
-    /// <summary>
-    /// Implements the AES-128-CBC scheme Unity's "Easy Save 3" asset uses,
-    /// which R.E.P.O. uses for its .es3 save files.
-    ///
-    /// Algorithm (verified against a known-working reference implementation,
-    /// not guessed): the first 16 bytes of the file are a random salt that
-    /// doubles as the AES IV. The key is PBKDF2-HMAC-SHA1(password, salt,
-    /// 100 iterations, 16 bytes). The remaining bytes are AES-128-CBC
-    /// ciphertext with PKCS7 padding.
-    /// </summary>
     public static class Es3Crypto
     {
-        // The password R.E.P.O. uses for its ES3 encryption settings.
-        // It's compiled into the game's assembly and has been documented
-        // publicly by the save-editing community (e.g. N0edL/R.E.P.O-Save-Editor).
         public const string RepoPassword = "Why would you want to cheat?... :o It's no fun. :') :'D";
 
         public static byte[] Decrypt(byte[] fileBytes, string password)
