@@ -101,6 +101,14 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+            <!-- A card with no baked bitmap yet has nothing to show and
+                 nothing meaningful to toggle — block hover/click until
+                 CardRenderer has actually produced its image. -->
+            <Style.Triggers>
+                <DataTrigger Binding="{Binding CardBitmap}" Value="{x:Null}">
+                    <Setter Property="IsHitTestVisible" Value="False"/>
+                </DataTrigger>
+            </Style.Triggers>
         </Style>
     </Window.Resources>
 

@@ -10,6 +10,11 @@
     <RootNamespace>RepoCosmeticTracker</RootNamespace>
     <!-- Extracted from the installed game's REPO.exe -->
     <ApplicationIcon>app.ico</ApplicationIcon>
+  
+
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    
   </PropertyGroup>
 
   <ItemGroup>

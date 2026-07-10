@@ -10,7 +10,6 @@ using System.Windows.Data;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Threading;
 using RepoCosmeticTracker.Models;
 using RepoCosmeticTracker.Services;
 
@@ -104,7 +103,6 @@ namespace RepoCosmeticTracker
             }
 
             PopulateCategories();
-            UpdateCounts();
         }
 
         private void SaveCatalog()
@@ -120,10 +118,6 @@ namespace RepoCosmeticTracker
             }
         }
 
-        /// <summary>
-        /// Cheap staleness check so we only pay for a full asset parse when
-        /// the game actually updated (or we've never built a catalog).
-        /// </summary>
         private bool CatalogLooksStale()
         {
             if (_cosmetics.Count == 0)
@@ -146,11 +140,6 @@ namespace RepoCosmeticTracker
 
             return false;
         }
-
-        /// <summary>
-        /// Rebuilds the catalog straight from the game's Unity data files,
-        /// preserving ownership of anything already tracked.
-        /// </summary>
         private async Task RebuildCatalogAsync(bool userRequested = false)
         {
             if (_rebuilding)
@@ -199,20 +188,25 @@ namespace RepoCosmeticTracker
                 foreach (CosmeticItem item in result.Items)
                     _cosmetics.Add(item);
 
-                // The game may have cached more icons since we last looked.
+                PopulateCategories();
+
+                HashSet<int>? unlocked = await ReadUnlockedIdsAsync();
+                if (unlocked != null)
+                {
+                    foreach (CosmeticItem item in _cosmetics)
+                        if (!item.Owned && item.NumericId.HasValue && unlocked.Contains(item.NumericId.Value))
+                            item.Owned = true;
+                }
+
+                SaveCatalog();
+
                 _iconIndex = await Task.Run(CosmeticIconIndex.BuildIndex);
                 await ApplyIconsAndBakeCardsAsync();
-
-                PopulateCategories();
-                SaveCatalog();
-                UpdateCounts();
 
                 int added = result.Items.Count(i => !oldIds.Contains(i.Id));
                 SetStatus(added > 0 && oldIds.Count > 0
                     ? $"Catalog updated {added} new cosmetic{(added == 1 ? "" : "s")} found."
                     : $"Catalog built {result.Items.Count} cosmetics.");
-
-                await SyncFromSaveAsync();
             }
             catch (Exception ex)
             {
@@ -249,25 +243,20 @@ namespace RepoCosmeticTracker
             }
         }
 
-        /// <summary>
-        /// Reads MetaSave.es3 and marks everything the game says is unlocked.
-        /// Additive on purpose: it never un-owns items you've checked by hand.
-        /// Retries briefly because the game may still hold the file mid-write.
-        /// </summary>
-        private async Task SyncFromSaveAsync()
+        private async Task<HashSet<int>?> ReadUnlockedIdsAsync()
         {
             string? root = GameLocator.GetRepoDataRoot();
             if (root == null)
             {
                 SetStatus("Save folder not found run R.E.P.O. once to create it.");
-                return;
+                return null;
             }
 
             string metaPath = Path.Combine(root, "MetaSave.es3");
             if (!File.Exists(metaPath))
             {
                 SetStatus("MetaSave.es3 not found yet waiting for the game to save.");
-                return;
+                return null;
             }
 
             string? json = null;
@@ -286,7 +275,7 @@ namespace RepoCosmeticTracker
             if (json == null)
             {
                 SetStatus("Couldn't read MetaSave.es3 (file busy) will retry on next save.");
-                return;
+                return null;
             }
 
             List<int>? unlocks;
@@ -302,10 +291,18 @@ namespace RepoCosmeticTracker
             if (unlocks == null)
             {
                 SetStatus("Save readable, but no cosmeticUnlocks field found.");
-                return;
+                return null;
             }
 
-            var unlockedSet = unlocks.ToHashSet();
+            return unlocks.ToHashSet();
+        }
+
+        private async Task SyncFromSaveAsync()
+        {
+            HashSet<int>? unlockedSet = await ReadUnlockedIdsAsync();
+            if (unlockedSet == null)
+                return;
+
             int newlyOwned = 0;
             foreach (CosmeticItem item in _cosmetics)
             {
@@ -453,35 +450,106 @@ namespace RepoCosmeticTracker
                 return null;
             return display.Replace(" ", "");
         }
+
         private async Task ApplyIconsAndBakeCardsAsync()
         {
             foreach (CosmeticItem item in _cosmetics)
                 item.IconPath = CosmeticIconIndex.Resolve(_iconIndex, item);
 
-            var paths = _cosmetics
+            var bakeOrder = _cosmetics
+                .OrderByDescending(c => c.RarityRank)
+                .ThenBy(c => c.DisplayName)
+                .ToList();
+
+            int total = bakeOrder.Count;
+            EmptyState.Visibility = total == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            string[] rarities = { "Common", "Uncommon", "Rare", "UltraRare" };
+            var rarityCountText = new Dictionary<string, TextBlock>
+            {
+                ["Common"] = CommonCountText,
+                ["Uncommon"] = UncommonCountText,
+                ["Rare"] = RareCountText,
+                ["UltraRare"] = UltraRareCountText
+            };
+
+            int trueOwned = bakeOrder.Count(c => c.Owned);
+            var rarityTrueTotal = rarities.ToDictionary(r => r, r => bakeOrder.Count(c => c.Rarity == r));
+            var rarityTrueOwned = rarities.ToDictionary(r => r, r => bakeOrder.Count(c => c.Rarity == r && c.Owned));
+            var rarityBakedSoFar = rarities.ToDictionary(r => r, _ => 0);
+
+            // Clear any held animation from a previous UpdateCounts, otherwise
+            // it outranks the per-card Width sets below and the bar freezes.
+            ProgressFill.BeginAnimation(WidthProperty, null);
+
+            TotalCountRun.Text = total.ToString();
+            OwnedCountRun.Text = "0";
+            ProgressFill.Width = 0;
+            foreach (string r in rarities)
+                rarityCountText[r].Text = $" 0/{rarityTrueTotal[r]}";
+
+            var paths = bakeOrder
                 .Select(c => c.IconPath)
                 .Where(p => p != null)
                 .Select(p => p!)
                 .Distinct()
                 .ToList();
+            if (paths.Count > 0)
+                SetStatus($"Decoding {paths.Count} icons…");
             await IconCache.PreloadAsync(paths);
 
-            int total = _cosmetics.Count;
             int i = 0;
-            foreach (CosmeticItem item in _cosmetics)
+            foreach (CosmeticItem item in bakeOrder)
             {
                 item.CardBitmap = CardRenderer.Render(item, IconCache.Get(item.IconPath));
+                AnimateReveal(item);
                 i++;
-                if (i % 24 == 0)
+
+                if (rarityBakedSoFar.ContainsKey(item.Rarity))
+                    rarityBakedSoFar[item.Rarity]++;
+
+                int shownOwned = (int)Math.Round(trueOwned * (double)i / total);
+                OwnedCountRun.Text = shownOwned.ToString();
+                ProgressFill.Width = ProgressBarWidth * shownOwned / total;
+
+                foreach (string r in rarities)
                 {
-                    SetStatus($"Rendering cards… {i}/{total}");
-                    await Dispatcher.Yield(DispatcherPriority.Background);
+                    int rTotal = rarityTrueTotal[r];
+                    int shown = rTotal == 0
+                        ? 0
+                        : (int)Math.Round(rarityTrueOwned[r] * (double)rarityBakedSoFar[r] / rTotal);
+                    rarityCountText[r].Text = $" {shown}/{rTotal}";
                 }
+
+                SetStatus($"Rendering cards… {i}/{total}");
+                await Task.Delay(4);
             }
+
+            UpdateCounts();
         }
 
-        private void RebakeCard(CosmeticItem item)
-            => item.CardBitmap = CardRenderer.Render(item, IconCache.Get(item.IconPath));
+        private void RebakeCard(CosmeticItem item) => item.CardBitmap = CardRenderer.Render(item, IconCache.Get(item.IconPath));
+
+
+        private void AnimateReveal(CosmeticItem item)
+        {
+            if (CardsHost.ItemContainerGenerator.ContainerFromItem(item) is not UIElement container)
+                return;
+
+            var scale = new ScaleTransform(0.7, 0.7);
+            container.RenderTransformOrigin = new Point(0.5, 0.5);
+            container.RenderTransform = scale;
+
+            var fade = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200)) { FillBehavior = FillBehavior.Stop };
+            container.BeginAnimation(OpacityProperty, fade);
+
+            var pop = new DoubleAnimation(0.7, 1.0, TimeSpan.FromMilliseconds(260))
+            {
+                EasingFunction = new BackEase { Amplitude = 0.5, EasingMode = EasingMode.EaseOut }
+            };
+            scale.BeginAnimation(ScaleTransform.ScaleXProperty, pop);
+            scale.BeginAnimation(ScaleTransform.ScaleYProperty, pop);
+        }
 
         private void PopulateCategories()
         {
@@ -553,7 +621,6 @@ namespace RepoCosmeticTracker
             {
                 IntPtr hwnd = new WindowInteropHelper(this).Handle;
                 int enabled = 1;
-                // 20 = DWMWA_USE_IMMERSIVE_DARK_MODE (19 on early Win10 builds).
                 if (DwmSetWindowAttribute(hwnd, 20, ref enabled, sizeof(int)) != 0)
                     DwmSetWindowAttribute(hwnd, 19, ref enabled, sizeof(int));
             }
