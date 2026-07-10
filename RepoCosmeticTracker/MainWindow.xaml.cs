@@ -524,6 +524,24 @@ namespace RepoCosmeticTracker
                 EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
             };
             ProgressFill.BeginAnimation(WidthProperty, animation);
+
+            SetRarityCount(CommonCountText, "Common");
+            SetRarityCount(UncommonCountText, "Uncommon");
+            SetRarityCount(RareCountText, "Rare");
+            SetRarityCount(UltraRareCountText, "UltraRare");
+        }
+
+        private void SetRarityCount(TextBlock target, string rarity)
+        {
+            int rarityOwned = 0;
+            int rarityTotal = 0;
+            foreach (CosmeticItem item in _cosmetics)
+            {
+                if (item.Rarity != rarity) continue;
+                rarityTotal++;
+                if (item.Owned) rarityOwned++;
+            }
+            target.Text = $" {rarityOwned}/{rarityTotal}";
         }
 
         private void SetStatus(string message) => StatusText.Text = message;

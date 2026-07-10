@@ -190,6 +190,8 @@
                     <StackPanel Orientation="Horizontal">
                         <Ellipse Width="8" Height="8" Fill="{StaticResource RarityCommonBrush}" Margin="0,1,6,0"/>
                         <TextBlock Text="Common" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"/>
+                        <TextBlock x:Name="CommonCountText" Text=" 0/0" FontWeight="Bold" Margin="4,0,0,0"
+                                   Foreground="{StaticResource RarityCommonBrush}"/>
                     </StackPanel>
                 </ToggleButton>
                 <ToggleButton x:Name="ChipUncommon" Style="{StaticResource Chip}" Tag="Uncommon" Margin="0,0,6,0"
@@ -197,6 +199,8 @@
                     <StackPanel Orientation="Horizontal">
                         <Ellipse Width="8" Height="8" Fill="{StaticResource RarityUncommonBrush}" Margin="0,1,6,0"/>
                         <TextBlock Text="Uncommon" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"/>
+                        <TextBlock x:Name="UncommonCountText" Text=" 0/0" FontWeight="Bold" Margin="4,0,0,0"
+                                   Foreground="{StaticResource RarityUncommonBrush}"/>
                     </StackPanel>
                 </ToggleButton>
                 <ToggleButton x:Name="ChipRare" Style="{StaticResource Chip}" Tag="Rare" Margin="0,0,6,0"
@@ -204,6 +208,8 @@
                     <StackPanel Orientation="Horizontal">
                         <Ellipse Width="8" Height="8" Fill="{StaticResource RarityRareBrush}" Margin="0,1,6,0"/>
                         <TextBlock Text="Rare" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"/>
+                        <TextBlock x:Name="RareCountText" Text=" 0/0" FontWeight="Bold" Margin="4,0,0,0"
+                                   Foreground="{StaticResource RarityRareBrush}"/>
                     </StackPanel>
                 </ToggleButton>
                 <ToggleButton x:Name="ChipUltraRare" Style="{StaticResource Chip}" Tag="UltraRare" Margin="0,0,10,0"
@@ -211,6 +217,8 @@
                     <StackPanel Orientation="Horizontal">
                         <Ellipse Width="8" Height="8" Fill="{StaticResource RarityUltraRareBrush}" Margin="0,1,6,0"/>
                         <TextBlock Text="Ultra Rare" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=ToggleButton}}"/>
+                        <TextBlock x:Name="UltraRareCountText" Text=" 0/0" FontWeight="Bold" Margin="4,0,0,0"
+                                   Foreground="{StaticResource RarityUltraRareBrush}"/>
                     </StackPanel>
                 </ToggleButton>
                 <ComboBox x:Name="CategoryCombo" MinWidth="150" SelectionChanged="CategoryCombo_SelectionChanged"/>
