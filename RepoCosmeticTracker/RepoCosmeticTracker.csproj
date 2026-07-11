@@ -10,11 +10,11 @@
     <RootNamespace>RepoCosmeticTracker</RootNamespace>
     <!-- Extracted from the installed game's REPO.exe -->
     <ApplicationIcon>app.ico</ApplicationIcon>
-  
+    <!-- Compared against GitHub release tags by UpdateChecker bump this on every tagged release. -->
+    <Version>1.2</Version>
 
     <SelfContained>false</SelfContained>
     <PublishSingleFile>true</PublishSingleFile>
-    
   </PropertyGroup>
 
   <ItemGroup>
