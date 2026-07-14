@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -31,6 +32,7 @@ namespace RepoCosmeticTracker
         private SaveWatcher? _watcher;
         private bool _rebuilding;
         private Dictionary<string, string> _iconIndex = new();
+        private string? _updateUrl;
 
         private static string CatalogPath => Path.Combine(AppContext.BaseDirectory, "catalog.json");
 
@@ -61,6 +63,8 @@ namespace RepoCosmeticTracker
 
         private async Task InitAsync()
         {
+            _ = CheckForUpdatesAsync();
+
             LoadCatalogFromDisk();
 
             string? install = GameLocator.FindRepoInstallFolder();
@@ -441,6 +445,33 @@ namespace RepoCosmeticTracker
         private async void RefreshButton_Click(object sender, RoutedEventArgs e)
         {
             await RebuildCatalogAsync(userRequested: true);
+        }
+
+        private async Task CheckForUpdatesAsync()
+        {
+            string currentVersion = System.Reflection.Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0";
+            UpdateChecker.UpdateInfo? info = await UpdateChecker.CheckAsync(currentVersion);
+            if (info == null)
+                return;
+
+            _updateUrl = info.Url;
+            UpdateBanner.Content = $"⬆ v{info.Version} available";
+            UpdateBanner.Visibility = Visibility.Visible;
+        }
+
+        private void UpdateBanner_Click(object sender, RoutedEventArgs e)
+        {
+            if (_updateUrl == null)
+                return;
+
+            try
+            {
+                Process.Start(new ProcessStartInfo(_updateUrl) { UseShellExecute = true });
+            }
+            catch
+            {
+                // Nothing more useful to do
+            }
         }
 
         /// <summary>Combo shows spaced names; filtering compares the raw ones.</summary>
